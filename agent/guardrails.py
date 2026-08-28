@@ -177,7 +177,17 @@ def scan_for_injected_instructions(text: str) -> InjectionScanResult:
     file's own `__main__` demo below, which runs an unambiguous injection
     attempt through this exact function and shows it sailing through
     uncaught. That gap is the assignment, not a bug report."""
-    return InjectionScanResult(suspicious=False, matched_patterns=())
+    if not isinstance(text, str):
+        return InjectionScanResult(suspicious=False, matched_patterns=())
+    patterns = {
+        "instruction_override": r"\b(?:ignore|disregard|forget)\b.{0,48}\b(?:previous|prior|system|safety)\b",
+        "role_impersonation": r"\b(?:system|developer)\s*(?:message|prompt|instruction)\b|\bas the system\b",
+        "secret_exfiltration": r"\b(?:reveal|print|expose|disclose|send)\b.{0,64}\b(?:secret|token|api[_ -]?key|grading key|ctx\.(?:act|scopes)|private)\b",
+        "tool_directive": r"\b(?:you must|must now|do not answer|instead,?\s+(?:call|use|execute))\b",
+        "prompt_delimiter": r"(?:<\/?system>|\[system\]|```system)",
+    }
+    matched = tuple(name for name, pattern in patterns.items() if re.search(pattern, text, re.I | re.S))
+    return InjectionScanResult(suspicious=bool(matched), matched_patterns=matched)
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +215,21 @@ def redact(text: str) -> RedactionResult:
 
     This starter's version does not look at `text` at all — see this
     file's own `__main__` demo below."""
-    return RedactionResult(redacted_text=text, hits=())
+    if not isinstance(text, str):
+        return RedactionResult(redacted_text="", hits=("invalid_text",))
+    rules = (
+        ("api_key", re.compile(r"\b(?:sk|rk|pk)-[A-Za-z0-9_-]{16,}\b")),
+        ("bearer_token", re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{16,}={0,2}")),
+        ("private_field", re.compile(r"(?i)\b(?:private[_ -]?(?:note|field)|grading[_ -]?key|secret)\s*[:=]\s*[^\r\n]{8,}")),
+        ("email", re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)),
+    )
+    redacted = text
+    hits: list[str] = []
+    for name, pattern in rules:
+        redacted, count = pattern.subn("[REDACTED]", redacted)
+        if count:
+            hits.append(name)
+    return RedactionResult(redacted_text=redacted, hits=tuple(hits))
 
 
 # ---------------------------------------------------------------------------
